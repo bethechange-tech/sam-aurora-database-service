@@ -1,0 +1,89 @@
+# https://betterdev.blog/aws-messaging-services-sqs-sns-kinesis-eventbridge/#:~:text=to%20provision%20throughput.-,Kinesis%20Data%20Streams,the%20consumer%20pulls%20the%20messages.
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  SAM aurora simple database setup
+
+Parameters:
+  DBClusterName:
+    Description: Aurora DB cluster name.
+    Type: String
+    Default: aurora-prod-cluster
+  DatabaseName:
+    Description: Aurora database name.
+    Type: String
+    Default: aurora_prod_db
+    AllowedPattern: '[a-zA-Z][a-zA-Z0-9_]*'
+    ConstraintDescription: Must begin with a letter and only contain alphanumeric characters.
+  DBAdminUserName:
+    Description: The admin user name.
+    Type: String
+    Default: admin_user
+    MinLength: '2'
+    MaxLength: '16'
+    AllowedPattern: '[a-zA-Z0-9_]+'
+    ConstraintDescription: Must be between 2 to 16 alphanumeric characters.
+
+Resources:
+    # Secrets Manager secret
+  DBSecret:
+    Type: 'AWS::SecretsManager::Secret'
+    Properties:
+      Name: !Sub '${DBClusterName}-AuroraUserSecret'
+      Description: RDS database auto-generated user password
+      GenerateSecretString:
+        SecretStringTemplate: !Sub '{"username": "${DBAdminUserName}"}'
+        GenerateStringKey: password
+        PasswordLength: 30
+        ExcludeCharacters: '"@/\'
+
+   # Aurora Serverless DB Cluster with Data API
+  AuroraCluster:
+    Type: 'AWS::RDS::DBCluster'
+    Properties:
+      BackupRetentionPeriod: 1
+      DBClusterIdentifier: !Ref DBClusterName
+      MasterUsername: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:username}}'
+      MasterUserPassword: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+      DatabaseName: !Ref DatabaseName
+      Engine: aurora-postgresql
+      EngineMode: serverless
+      # Enable the Data API for Aurora Serverless
+      EnableHttpEndpoint: true
+      ScalingConfiguration:
+        AutoPause: true
+        MinCapacity: 2
+        MaxCapacity: 384
+        SecondsUntilAutoPause: 3600
+
+Outputs:
+  DBClusterArn:
+    Description: Aurora DB Cluster Resource ARN
+    Value: !Sub 'arn:aws:rds:${AWS::Region}:${AWS::AccountId}:cluster:${DBClusterName}'
+    Export:
+      Name: !Sub "default-db-cluster-arn"
+  DBClusterEndpoint:
+    Description: Aurora DB Cluster Endpoint Address
+    Value: !GetAtt AuroraCluster.Endpoint.Address
+    Export:
+      Name: !Sub "default-db-cluster-endpoint"
+  DBName:
+    Description: Aurora Database Name
+    Value: !Ref DatabaseName
+    Export:
+      Name: !Sub "default-db-name"
+  DBAdminUserName:
+    Description: Aurora Database Admin User
+    Value: !Ref DBAdminUserName
+    Export:
+      Name: !Sub "default-db-admin-username"
+  SecretArn:
+    Description: Secrets Manager Secret ARN
+    Value: !Ref DBSecret
+    Export:
+      Name: !Sub "default-db-secret"
+  DBPASSWORD: 
+    Description: DBPASSWORD
+    Value: !Sub '{{resolve:secretsmanager:${DBSecret}:SecretString:password}}'
+    Export:
+      Name: !Sub "default-db-password"
